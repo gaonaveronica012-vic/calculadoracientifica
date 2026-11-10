@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFF5F8">
+
+    <!-- Decoración de fondo (parallax) -->
+    <View
+        android:id="@+id/blobTop"
+        android:layout_width="260dp"
+        android:layout_height="260dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="-90dp"
+        android:layout_marginEnd="-80dp"
+        android:importantForAccessibility="no" />
+
+    <View
+        android:id="@+id/blobBottom"
+        android:layout_width="300dp"
+        android:layout_height="300dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="-120dp"
+        android:layout_marginBottom="-100dp"
+        android:importantForAccessibility="no" />
+
+    <!-- Contenido principal -->
+    <LinearLayout
+        android:id="@+id/content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <!-- Encabezado -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Título desplegable (científica / básica) y menú de tres puntos -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatTextView
+                    android:id="@+id/tvTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:gravity="center_vertical"
+                    android:letterSpacing="0.05"
+                    android:maxLines="1"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="CALCULADORA"
+                    android:textColor="#2B1220"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    app:autoSizeMaxTextSize="14sp"
+                    app:autoSizeMinTextSize="10sp"
+                    app:autoSizeStepGranularity="1sp"
+                    app:autoSizeTextType="uniform" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Pantalla -->
+        <LinearLayout
+            android:id="@+id/displayCard"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="2.2"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp">
+
+
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/etExpression"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1.2"
+                android:background="@null"
+                android:contentDescription="Expresión"
+                android:cursorVisible="true"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:gravity="bottom|end"
+                android:hint="0"
+                android:imeOptions="flagNoExtractUi"
+                android:importantForAutofill="no"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:padding="0dp"
+                android:textSize="30sp" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/tvResult"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="0.8"
+                android:gravity="center_vertical|end"
+                android:maxLines="1"
+                android:textStyle="bold"
+                app:autoSizeMaxTextSize="42sp"
+                app:autoSizeMinTextSize="14sp"
+                app:autoSizeStepGranularity="1sp"
+                app:autoSizeTextType="uniform" />
+        </LinearLayout>
+
+        <!-- Teclado -->
+        <LinearLayout
+            android:id="@+id/keypad"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            android:layout_weight="5.4"
+            android:orientation="vertical">
+
+            <!-- Fila 1 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnClear"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Borrar todo" android:text="AC" android:textAllCaps="false" android:textSize="20sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnBackspace"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Borrar último carácter" android:text="⌫" android:textAllCaps="false" android:textSize="22sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDivide"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Dividir" android:text="÷" android:textAllCaps="false" android:textSize="26sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnMultiply"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Multiplicar" android:text="×" android:textAllCaps="false" android:textSize="26sp" android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Fila 2 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btn7"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:text="7" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btn8"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:text="8" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btn9"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:text="9" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnSubtract"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Restar" android:text="−" android:textAllCaps="false" android:textSize="26sp" android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Fila 3 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btn4"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:text="4" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btn5"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:text="5" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btn6"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:text="6" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnAdd"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Sumar" android:text="+" android:textAllCaps="false" android:textSize="26sp" android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Bloque inferior: 1 2 3 / 0 . y el igual alto -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="2"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="3"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="horizontal">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn1"
+                            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                            android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                            android:text="1" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn2"
+                            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                            android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                            android:text="2" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn3"
+                            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                            android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                            android:text="3" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="horizontal">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn0"
+                            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="2"
+                            android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                            android:text="0" android:textAllCaps="false" android:textSize="24sp" android:textStyle="bold" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnDot"
+                            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                            android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                            android:contentDescription="Punto decimal" android:text="." android:textAllCaps="false" android:textSize="26sp" android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnEquals"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_margin="4dp" android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp"
+                    android:contentDescription="Igual" android:text="=" android:textAllCaps="false" android:textSize="32sp" android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+</FrameLayout>
