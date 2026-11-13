@@ -26,10 +26,12 @@ import androidx.core.view.WindowInsetsCompat
 import java.math.BigDecimal
 import java.math.MathContext
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.tan
 
 // =====================================================================
 //  MOTOR MATEMÁTICO (parser de precedencia, sin eval)
@@ -42,6 +44,9 @@ object ExpressionEvaluator {
     private sealed class Tok {
         class Num(val v: Double) : Tok()
         class Op(val c: Char) : Tok()      // '+', '-', '*', '/'
+        class Fn(val name: String) : Tok()
+        object LP : Tok()
+        object RP : Tok()
     }
 
     private fun isDigit(c: Char) = c in '0'..'9'
@@ -79,13 +84,25 @@ object ExpressionEvaluator {
                 ch == '-' || ch == '−' -> { out.add(Tok.Op('-')); i++ }
                 ch == '×' || ch == '*' -> { out.add(Tok.Op('*')); i++ }
                 ch == '÷' || ch == '/' -> { out.add(Tok.Op('/')); i++ }
+                ch == '^' -> { out.add(Tok.Op('^')); i++ }
+                ch == '(' -> { out.add(Tok.LP); i++ }
+                ch == ')' -> { out.add(Tok.RP); i++ }
+                ch.isLetter() -> {
+                    val st = i
+                    while (i < s.length && s[i].isLetter()) i++
+                    val name = s.substring(st, i).lowercase()
+                    if (name != "sin" && name != "cos" && name != "tan") {
+                        throw CalcException("Función desconocida: $name")
+                    }
+                    out.add(Tok.Fn(name))
+                }
                 else -> throw CalcException("Carácter no válido: $ch")
             }
         }
         return out
     }
 
-    private class Parser(private val t: List<Tok>) {
+    private class Parser(private val t: List<Tok>, private val deg: Boolean) {
         private var p = 0
 
         private fun peek(): Tok? = if (p < t.size) t[p] else null
@@ -93,7 +110,10 @@ object ExpressionEvaluator {
         fun parse(): Double {
             if (t.isEmpty()) throw CalcException("Expresión vacía")
             val v = expr()
-            if (p < t.size) throw CalcException("Error de sintaxis")
+            if (p < t.size) {
+                if (peek() is Tok.RP) throw CalcException("Paréntesis de cierre sin apertura")
+                throw CalcException("Error de sintaxis")
+            }
             return v
         }
 
@@ -111,7 +131,7 @@ object ExpressionEvaluator {
             return v
         }
 
-        // term := unary (('*' | '/') unary)*   -> la multiplicación y división tienen prioridad
+        // term := unary (('*' | '/') unary | implicit unary)*
         private fun term(): Double {
             var v = unary()
             while (true) {
@@ -125,32 +145,102 @@ object ExpressionEvaluator {
                         if (r == 0.0) throw CalcException("No se puede dividir entre 0")
                         v /= r
                     }
+                } else if (k is Tok.Num || k is Tok.Fn || k is Tok.LP) {
+                    v *= unary() // multiplicación implícita: 2(3), 2sin(30)
                 } else break
             }
             return v
         }
 
-        // unary := ('+' | '-') unary | NUM
+        // unary := ('+' | '-') unary | primary
         private fun unary(): Double {
+            val k = peek()
+            if (k is Tok.Op && (k.c == '+' || k.c == '-')) {
+                p++
+                val v = unary()
+                return if (k.c == '-') -v else v
+            }
+            return power()
+        }
+
+        // power := primary ('^' unary)?   (asociativa a la derecha: 2^3^2 = 2^9; 2^-1 permitido)
+        private fun power(): Double {
+            val base = primary()
+            val k = peek()
+            if (k is Tok.Op && k.c == '^') {
+                p++
+                val ex = unary()
+                return pow(base, ex)
+            }
+            return base
+        }
+
+        private fun pow(b: Double, ex: Double): Double {
+            if (b == 0.0 && ex == 0.0) throw CalcException("0^0 no está definido")
+            if (b == 0.0 && ex < 0.0) throw CalcException("No se puede dividir entre 0")
+            val r = Math.pow(b, ex)
+            if (r.isNaN()) throw CalcException("Resultado no real")
+            if (r.isInfinite()) throw CalcException("Valor no válido")
+            return r
+        }
+
+        // primary := NUM | '(' expr ')' | FN '(' expr ')'
+        private fun primary(): Double {
             val k = peek() ?: throw CalcException("Expresión incompleta")
             p++
             return when (k) {
                 is Tok.Num -> k.v
-                is Tok.Op -> {
-                    if (k.c == '+' || k.c == '-') {
-                        val v = unary()
-                        if (k.c == '-') -v else v
-                    } else {
-                        throw CalcException("Error de sintaxis")
+                is Tok.LP -> {
+                    val v = expr()
+                    close()
+                    v
+                }
+                is Tok.Fn -> {
+                    if (peek() !is Tok.LP) throw CalcException("Falta '(' después de ${k.name}")
+                    p++
+                    val v = expr()
+                    close()
+                    apply(k.name, v)
+                }
+                is Tok.RP -> throw CalcException("Error de sintaxis")
+                is Tok.Op -> throw CalcException("Error de sintaxis")
+            }
+        }
+
+        private fun close() {
+            if (peek() !is Tok.RP) throw CalcException("Paréntesis incompletos")
+            p++
+        }
+
+        private fun apply(name: String, x: Double): Double {
+            if (x.isNaN() || x.isInfinite()) throw CalcException("Valor no válido")
+            val r: Double
+            if (deg) {
+                when (name) {
+                    "sin" -> r = if (x % 180.0 == 0.0) 0.0 else sin(Math.toRadians(x % 360.0))
+                    "cos" -> r = if ((x - 90.0) % 180.0 == 0.0) 0.0 else cos(Math.toRadians(x % 360.0))
+                    else -> {
+                        if ((x - 90.0) % 180.0 == 0.0) throw CalcException("Tangente indefinida")
+                        r = if (x % 180.0 == 0.0) 0.0 else tan(Math.toRadians(x % 360.0))
+                    }
+                }
+            } else {
+                when (name) {
+                    "sin" -> r = sin(x)
+                    "cos" -> r = cos(x)
+                    else -> {
+                        if (abs(cos(x)) < 1e-12) throw CalcException("Tangente indefinida")
+                        r = tan(x)
                     }
                 }
             }
+            return if (abs(r) < 1e-15) 0.0 else r
         }
     }
 
-    fun evaluate(expression: String): Double {
+    fun evaluate(expression: String, deg: Boolean): Double {
         try {
-            val v = Parser(tokenize(expression)).parse()
+            val v = Parser(tokenize(expression), deg).parse()
             if (v.isNaN() || v.isInfinite()) throw CalcException("Valor no válido")
             return v
         } catch (e: StackOverflowError) {
@@ -217,8 +307,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var blobBottom: View
     private lateinit var displayCard: View
     private lateinit var tvTitle: TextView
+    private lateinit var tvAngle: TextView
     private lateinit var tvResult: TextView
     private lateinit var etExpression: EditText
+    private lateinit var btnAngle: Button
 
     // ---- Drawables ----
     private val blob1Bg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
@@ -229,6 +321,7 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Estado ----
     private var cur: Palette = Palette.PINK_LIGHT
+    private var deg = true
     private var justEvaluated = false
     private var lastResult: String? = null
     private var resultState = 0 // 0 = vista previa, 1 = final, 2 = error
@@ -266,6 +359,7 @@ class MainActivity : AppCompatActivity() {
 
         applyPalette(cur)
         updateSystemBars()
+        refreshAngleUi()
 
         etExpression.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -296,8 +390,10 @@ class MainActivity : AppCompatActivity() {
         blobBottom = findViewById(R.id.blobBottom)
         displayCard = findViewById(R.id.displayCard)
         tvTitle = findViewById(R.id.tvTitle)
+        tvAngle = findViewById(R.id.tvAngleMode)
         tvResult = findViewById(R.id.tvResult)
         etExpression = findViewById(R.id.etExpression)
+        btnAngle = findViewById(R.id.btnAngle)
     }
 
     private fun setupDrawables() {
@@ -330,6 +426,14 @@ class MainActivity : AppCompatActivity() {
         key(R.id.btnMultiply, Kind.OP) { inputOperator('×') }
         key(R.id.btnDivide, Kind.OP) { inputOperator('÷') }
 
+        // Funciones científicas y paréntesis
+        key(R.id.btnSin, Kind.FUNC) { inputFunction("sin") }
+        key(R.id.btnCos, Kind.FUNC) { inputFunction("cos") }
+        key(R.id.btnTan, Kind.FUNC) { inputFunction("tan") }
+        key(R.id.btnOpen, Kind.FUNC) { inputOpen() }
+        key(R.id.btnClose, Kind.FUNC) { inputClose() }
+        key(R.id.btnPow, Kind.FUNC) { inputOperator('^') }
+
         // Control
         key(R.id.btnClear, Kind.CLR) { clearAll() }
         val back = key(R.id.btnBackspace, Kind.CLR) { backspace() }
@@ -339,6 +443,8 @@ class MainActivity : AppCompatActivity() {
         }
         key(R.id.btnEquals, Kind.EQ) { calculate() }
 
+        // Encabezado
+        key(R.id.btnAngle, Kind.HDR) { toggleAngle() }
     }
 
     // =================================================================
@@ -447,7 +553,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun isDigitChar(c: Char?) = c != null && c in '0'..'9'
 
-    private fun isOpChar(c: Char?) = c == '+' || c == '−' || c == '×' || c == '÷'
+    private fun isOpChar(c: Char?) = c == '+' || c == '−' || c == '×' || c == '÷' || c == '^'
 
     private fun inputDigit(d: String) {
         startFreshIfNeeded()
@@ -467,6 +573,7 @@ class MainActivity : AppCompatActivity() {
         val ins = when {
             prev == null -> "0."
             isDigitChar(prev) -> "."
+            prev == ')' -> "×0."
             else -> "0."
         }
         insertText(ins)
@@ -487,25 +594,44 @@ class MainActivity : AppCompatActivity() {
         val prev = if (a > 0) s[a - 1] else null
         when {
             a != b -> insertText(c.toString())
-            prev == null -> {
+            prev == null || prev == '(' -> {
                 if (c == '−') insertText("−") // solo se permite el signo negativo
             }
             isOpChar(prev) -> {
                 val prev2 = if (a > 1) s[a - 2] else null
                 val e = etExpression.text
-                if (c == '−' && (prev == '×' || prev == '÷')) {
+                if (c == '−' && (prev == '×' || prev == '÷' || prev == '^')) {
                     insertText("−") // 2×−3
-                } else if (prev == '−' && (prev2 == '×' || prev2 == '÷') && c != '−') {
+                } else if (prev == '−' && (prev2 == '×' || prev2 == '÷' || prev2 == '^') && c != '−') {
                     e.replace(a - 2, a, c.toString()) // 2×−  →  2+
                     etExpression.setSelection(a - 1)
                 } else {
-                    if ((c == '×' || c == '÷') && prev2 == null) return
+                    if ((c == '×' || c == '÷' || c == '^') && (prev2 == null || prev2 == '(')) return
                     e.replace(a - 1, a, c.toString())
                     etExpression.setSelection(a)
                 }
             }
             else -> insertText(c.toString())
         }
+    }
+
+    private fun inputFunction(name: String) {
+        startFreshIfNeeded()
+        insertText("$name(")
+    }
+
+    private fun inputOpen() {
+        startFreshIfNeeded()
+        insertText("(")
+    }
+
+    private fun inputClose() {
+        val (a, _) = selRange()
+        val s = etExpression.text.toString()
+        val before = s.substring(0, a)
+        val open = before.count { it == '(' } - before.count { it == ')' }
+        val prev = if (a > 0) s[a - 1] else null
+        if (open > 0 && (isDigitChar(prev) || prev == '.' || prev == ')')) insertText(")")
     }
 
     private fun backspace() {
@@ -516,8 +642,10 @@ class MainActivity : AppCompatActivity() {
             e.delete(a, b)
             etExpression.setSelection(a)
         } else if (a > 0) {
-            e.delete(a - 1, a)
-            etExpression.setSelection(a - 1)
+            val before = e.substring(0, a)
+            val n = if (before.endsWith("sin(") || before.endsWith("cos(") || before.endsWith("tan(")) 4 else 1
+            e.delete(a - n, a)
+            etExpression.setSelection(a - n)
         }
     }
 
@@ -539,7 +667,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         try {
-            showResult(ExpressionEvaluator.format(ExpressionEvaluator.evaluate(s)), 0)
+            showResult(ExpressionEvaluator.format(ExpressionEvaluator.evaluate(s, deg)), 0)
         } catch (e: CalcException) {
             showResult("", 0)
         } catch (e: Exception) {
@@ -551,7 +679,7 @@ class MainActivity : AppCompatActivity() {
         val s = etExpression.text.toString().trim()
         if (s.isEmpty()) return
         try {
-            val r = ExpressionEvaluator.format(ExpressionEvaluator.evaluate(s))
+            val r = ExpressionEvaluator.format(ExpressionEvaluator.evaluate(s, deg))
             lastResult = r
             justEvaluated = true
             showResult(r, 1)
@@ -588,6 +716,19 @@ class MainActivity : AppCompatActivity() {
             .setInterpolator(DecelerateInterpolator()).start()
     }
 
+    private fun toggleAngle() {
+        deg = !deg
+        refreshAngleUi()
+        if (justEvaluated) calculate() else updatePreview()
+    }
+
+    private fun refreshAngleUi() {
+        btnAngle.text = if (deg) "DEG" else "RAD"
+        tvAngle.text = if (deg) "DEG · GRADOS" else "RAD · RADIANES"
+        btnAngle.contentDescription =
+            if (deg) "Modo grados activo. Pulsa para usar radianes" else "Modo radianes activo. Pulsa para usar grados"
+    }
+
     // =================================================================
     //  Temas, colores y animaciones
     // =================================================================
@@ -613,6 +754,7 @@ class MainActivity : AppCompatActivity() {
         titleBg.setColor(p.hdrBg)
         titleBg.setStroke(dp(1), ColorUtils.setAlphaComponent(p.stroke, 140))
         tvTitle.setShadowLayer(16f, 0f, 0f, ColorUtils.setAlphaComponent(p.stroke, 150))
+        tvAngle.setTextColor(p.funcText)
         etExpression.setTextColor(p.text)
         etExpression.setHintTextColor(p.textSec)
         tvResult.setTextColor(resultColor())
