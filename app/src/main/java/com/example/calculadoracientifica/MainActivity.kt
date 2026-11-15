@@ -1,23 +1,38 @@
 package com.example.calculadoracientifica
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.content.SharedPreferences
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
@@ -266,6 +281,8 @@ class MainActivity : AppCompatActivity() {
 
     private enum class Kind { NUM, FUNC, OP, EQ, CLR, HDR }
 
+    private enum class Accent { BLUE, PINK, GREEN }
+
     /** Paleta de colores; se interpola para animar el cambio de tema. */
     private class Palette(val c: IntArray) {
         val bg get() = c[0]
@@ -291,6 +308,9 @@ class MainActivity : AppCompatActivity() {
         val hdrText get() = c[20]
 
         companion object {
+            fun lerp(a: Palette, b: Palette, t: Float) =
+                Palette(IntArray(a.c.size) { ColorUtils.blendARGB(a.c[it], b.c[it], t) })
+
             val PINK_LIGHT = Palette(intArrayOf(
                 col("#FFF5F8"), col("#FFFFFF"), col("#FF2E93"), col("#2B1220"), col("#8A5A73"),
                 col("#FFE3EE"), col("#3A1A2A"), col("#FFC9DE"), col("#7A1050"), col("#FF6FAE"),
@@ -298,6 +318,47 @@ class MainActivity : AppCompatActivity() {
                 col("#40FF2E93"), col("#40C026D3"), col("#FFF0F6"), col("#FFFFFF"), col("#FFE3EE"),
                 col("#7A1050")
             ))
+            val PINK_DARK = Palette(intArrayOf(
+                col("#120A10"), col("#1E1119"), col("#FF2E93"), col("#FFF0F6"), col("#C79AB2"),
+                col("#3A1B2D"), col("#FFE4F0"), col("#5A1D45"), col("#FFB6DA"), col("#8E1A5C"),
+                col("#FFFFFF"), col("#FF2E93"), col("#18060F"), col("#4A1230"), col("#FF7AB6"),
+                col("#55FF2E93"), col("#55B01EC8"), col("#1A0E16"), col("#2A1623"), col("#2A1623"),
+                col("#FFB6DA")
+            ))
+            val BLUE_LIGHT = Palette(intArrayOf(
+                col("#F3F8FF"), col("#FFFFFF"), col("#2E7BFF"), col("#0F1D33"), col("#4F6A8F"),
+                col("#DCEBFF"), col("#12233F"), col("#B9D5FF"), col("#0B3A8C"), col("#5E9BFF"),
+                col("#04122B"), col("#1558D6"), col("#FFFFFF"), col("#A9C8FF"), col("#0A3A8F"),
+                col("#402E7BFF"), col("#4026C6DA"), col("#EEF5FF"), col("#FFFFFF"), col("#DCEBFF"),
+                col("#0B3A8C")
+            ))
+            val BLUE_DARK = Palette(intArrayOf(
+                col("#08101C"), col("#101B2E"), col("#3D8BFF"), col("#EAF3FF"), col("#93AFD6"),
+                col("#1B2D4A"), col("#E1EEFF"), col("#23407A"), col("#A9CCFF"), col("#1F52B5"),
+                col("#FFFFFF"), col("#3D8BFF"), col("#04122B"), col("#1A3566"), col("#8DBBFF"),
+                col("#553D8BFF"), col("#5522B8CF"), col("#0D1626"), col("#172640"), col("#172640"),
+                col("#A9CCFF")
+            ))
+            val GREEN_LIGHT = Palette(intArrayOf(
+                col("#F2FBF5"), col("#FFFFFF"), col("#14C46B"), col("#0F2A1B"), col("#4C7660"),
+                col("#DDF4E6"), col("#123524"), col("#B8E8CB"), col("#0B5A33"), col("#4FD18A"),
+                col("#04281A"), col("#0B7F45"), col("#FFFFFF"), col("#A8E3C0"), col("#0A5A30"),
+                col("#4014C46B"), col("#4000B8A9"), col("#EDFAF2"), col("#FFFFFF"), col("#DDF4E6"),
+                col("#0B5A33")
+            ))
+            val GREEN_DARK = Palette(intArrayOf(
+                col("#08130D"), col("#0F1F16"), col("#22E07A"), col("#EAFBF1"), col("#96C7AB"),
+                col("#1A3326"), col("#DFF8EA"), col("#1F5A3A"), col("#A8F0C8"), col("#17804A"),
+                col("#FFFFFF"), col("#22E07A"), col("#04170D"), col("#17402B"), col("#7DF0B0"),
+                col("#5522E07A"), col("#5500B8A9"), col("#0C1A12"), col("#16291E"), col("#16291E"),
+                col("#A8F0C8")
+            ))
+
+            fun get(accent: Accent, dark: Boolean): Palette = when (accent) {
+                Accent.BLUE -> if (dark) BLUE_DARK else BLUE_LIGHT
+                Accent.PINK -> if (dark) PINK_DARK else PINK_LIGHT
+                Accent.GREEN -> if (dark) GREEN_DARK else GREEN_LIGHT
+            }
         }
     }
 
@@ -311,6 +372,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvResult: TextView
     private lateinit var etExpression: EditText
     private lateinit var btnAngle: Button
+    private lateinit var btnMenu: Button
 
     // ---- Drawables ----
     private val blob1Bg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
@@ -320,16 +382,48 @@ class MainActivity : AppCompatActivity() {
     private val titleBg = GradientDrawable()
 
     // ---- Estado ----
+    private lateinit var prefs: SharedPreferences
     private var cur: Palette = Palette.PINK_LIGHT
+    private var accent = Accent.PINK
+    private var dark = false
     private var deg = true
+    private var soundOn = true
     private var justEvaluated = false
     private var lastResult: String? = null
     private var resultState = 0 // 0 = vista previa, 1 = final, 2 = error
     private val keys = ArrayList<Key>()
+    private var themeAnim: ValueAnimator? = null
+
+    // ---- Sonido y sensores ----
+    private var tone: ToneGenerator? = null
+    private var sensorManager: SensorManager? = null
+    private var accel: Sensor? = null
+    private var px = 0f
+    private var py = 0f
+
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            val tx = (-event.values[0] / 9.81f).coerceIn(-1f, 1f)
+            val ty = (event.values[1] / 9.81f).coerceIn(-1f, 1f)
+            px += (tx - px) * 0.08f
+            py += (ty - py) * 0.08f
+            blobTop.translationX = px * dpF(16)
+            blobTop.translationY = py * dpF(16)
+            blobBottom.translationX = -px * dpF(26)
+            blobBottom.translationY = -py * dpF(26)
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     private val numberOnly = Regex("^[-−+]?[0-9.]*$")
 
     companion object {
+        private const val PREFS = "calc_rosa_prefs"
+        private const val K_DARK = "dark"
+        private const val K_DEG = "deg"
+        private const val K_SOUND = "sound"
+        private const val K_ACCENT = "accent"
         private const val MAX_LENGTH = 300
     }
 
@@ -344,10 +438,26 @@ class MainActivity : AppCompatActivity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContentView(R.layout.activity_main)
 
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         bindViews()
+
+        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+        dark = prefs.getBoolean(K_DARK, systemDark)
+        deg = prefs.getBoolean(K_DEG, true)
+        soundOn = prefs.getBoolean(K_SOUND, true)
+        accent = Accent.values().getOrElse(prefs.getInt(K_ACCENT, Accent.PINK.ordinal)) { Accent.PINK }
 
         setupDrawables()
         setupKeys()
+
+        try {
+            tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+        } catch (e: Exception) {
+            tone = null
+        }
+        sensorManager = getSystemService(SENSOR_SERVICE) as? SensorManager
+        accel = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         // Pantalla de expresión: el cursor se puede mover y no aparece el teclado del sistema
         etExpression.showSoftInputOnFocus = false
@@ -357,6 +467,7 @@ class MainActivity : AppCompatActivity() {
         }
         etExpression.requestFocus()
 
+        cur = Palette.get(accent, dark)
         applyPalette(cur)
         updateSystemBars()
         refreshAngleUi()
@@ -380,6 +491,40 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
+    override fun onResume() {
+        super.onResume()
+        val s = accel
+        if (s != null && animationsEnabled()) {
+            sensorManager?.registerListener(sensorListener, s, SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager?.unregisterListener(sensorListener)
+        savePrefs()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        themeAnim?.cancel()
+        try {
+            tone?.release()
+        } catch (e: Exception) {
+            // ignorar
+        }
+        tone = null
+    }
+
+    private fun savePrefs() {
+        prefs.edit()
+            .putBoolean(K_DARK, dark)
+            .putBoolean(K_DEG, deg)
+            .putBoolean(K_SOUND, soundOn)
+            .putInt(K_ACCENT, accent.ordinal)
+            .apply()
+    }
+
     // =================================================================
     //  Inicialización de vistas
     // =================================================================
@@ -394,6 +539,7 @@ class MainActivity : AppCompatActivity() {
         tvResult = findViewById(R.id.tvResult)
         etExpression = findViewById(R.id.etExpression)
         btnAngle = findViewById(R.id.btnAngle)
+        btnMenu = findViewById(R.id.btnMenu)
     }
 
     private fun setupDrawables() {
@@ -416,35 +562,36 @@ class MainActivity : AppCompatActivity() {
             R.id.btn5, R.id.btn6, R.id.btn7, R.id.btn8, R.id.btn9
         )
         for (d in 0..9) {
-            key(digitIds[d], Kind.NUM) { inputDigit(d.toString()) }
+            key(digitIds[d], Kind.NUM, ToneGenerator.TONE_DTMF_0 + d) { inputDigit(d.toString()) }
         }
-        key(R.id.btnDot, Kind.NUM) { inputDot() }
+        key(R.id.btnDot, Kind.NUM, ToneGenerator.TONE_DTMF_S) { inputDot() }
 
         // Operadores
-        key(R.id.btnAdd, Kind.OP) { inputOperator('+') }
-        key(R.id.btnSubtract, Kind.OP) { inputOperator('−') }
-        key(R.id.btnMultiply, Kind.OP) { inputOperator('×') }
-        key(R.id.btnDivide, Kind.OP) { inputOperator('÷') }
+        key(R.id.btnAdd, Kind.OP, ToneGenerator.TONE_DTMF_A) { inputOperator('+') }
+        key(R.id.btnSubtract, Kind.OP, ToneGenerator.TONE_DTMF_A) { inputOperator('−') }
+        key(R.id.btnMultiply, Kind.OP, ToneGenerator.TONE_DTMF_A) { inputOperator('×') }
+        key(R.id.btnDivide, Kind.OP, ToneGenerator.TONE_DTMF_A) { inputOperator('÷') }
 
         // Funciones científicas y paréntesis
-        key(R.id.btnSin, Kind.FUNC) { inputFunction("sin") }
-        key(R.id.btnCos, Kind.FUNC) { inputFunction("cos") }
-        key(R.id.btnTan, Kind.FUNC) { inputFunction("tan") }
-        key(R.id.btnOpen, Kind.FUNC) { inputOpen() }
-        key(R.id.btnClose, Kind.FUNC) { inputClose() }
-        key(R.id.btnPow, Kind.FUNC) { inputOperator('^') }
+        key(R.id.btnSin, Kind.FUNC, ToneGenerator.TONE_DTMF_B) { inputFunction("sin") }
+        key(R.id.btnCos, Kind.FUNC, ToneGenerator.TONE_DTMF_B) { inputFunction("cos") }
+        key(R.id.btnTan, Kind.FUNC, ToneGenerator.TONE_DTMF_B) { inputFunction("tan") }
+        key(R.id.btnOpen, Kind.FUNC, ToneGenerator.TONE_DTMF_C) { inputOpen() }
+        key(R.id.btnClose, Kind.FUNC, ToneGenerator.TONE_DTMF_C) { inputClose() }
+        key(R.id.btnPow, Kind.FUNC, ToneGenerator.TONE_DTMF_B) { inputOperator('^') }
 
         // Control
-        key(R.id.btnClear, Kind.CLR) { clearAll() }
-        val back = key(R.id.btnBackspace, Kind.CLR) { backspace() }
+        key(R.id.btnClear, Kind.CLR, ToneGenerator.TONE_DTMF_D) { clearAll() }
+        val back = key(R.id.btnBackspace, Kind.CLR, ToneGenerator.TONE_DTMF_D) { backspace() }
         back.setOnLongClickListener {
             clearAll()
             true
         }
-        key(R.id.btnEquals, Kind.EQ) { calculate() }
+        key(R.id.btnEquals, Kind.EQ, ToneGenerator.TONE_PROP_PROMPT) { calculate() }
 
         // Encabezado
-        key(R.id.btnAngle, Kind.HDR) { toggleAngle() }
+        key(R.id.btnAngle, Kind.HDR, ToneGenerator.TONE_DTMF_C) { toggleAngle() }
+        key(R.id.btnMenu, Kind.HDR, ToneGenerator.TONE_DTMF_C) { showMainMenu(btnMenu) }
     }
 
     // =================================================================
@@ -500,10 +647,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun key(id: Int, kind: Kind, action: () -> Unit): Button {
+    private fun key(id: Int, kind: Kind, toneType: Int, action: () -> Unit): Button {
         val b = findViewById<Button>(id)
         keys.add(Key(b, kind))
         b.setOnClickListener {
+            playTone(toneType)
             action()
         }
         b.setOnTouchListener { v, ev ->
@@ -519,6 +667,20 @@ class MainActivity : AppCompatActivity() {
             false
         }
         return b
+    }
+
+    private fun playTone(type: Int) {
+        if (!soundOn || type < 0) return
+        try {
+            val t = tone
+            if (t != null) {
+                t.startTone(type, 45)
+            } else {
+                (getSystemService(AUDIO_SERVICE) as? AudioManager)?.playSoundEffect(AudioManager.FX_KEY_CLICK)
+            }
+        } catch (e: Exception) {
+            // si el audio falla, la calculadora sigue funcionando
+        }
     }
 
     // =================================================================
@@ -699,7 +861,7 @@ class MainActivity : AppCompatActivity() {
     private fun resultColor(): Int = when (resultState) {
         0 -> cur.textSec
         1 -> cur.text
-        else -> col("#C62828")
+        else -> if (dark) col("#FF8A9E") else col("#C62828")
     }
 
     private fun showResult(text: String, state: Int) {
@@ -720,6 +882,7 @@ class MainActivity : AppCompatActivity() {
         deg = !deg
         refreshAngleUi()
         if (justEvaluated) calculate() else updatePreview()
+        savePrefs()
     }
 
     private fun refreshAngleUi() {
@@ -729,14 +892,155 @@ class MainActivity : AppCompatActivity() {
             if (deg) "Modo grados activo. Pulsa para usar radianes" else "Modo radianes activo. Pulsa para usar grados"
     }
 
+    private fun toggleSound() {
+        soundOn = !soundOn
+        savePrefs()
+        Toast.makeText(this, if (soundOn) "Sonido activado" else "Sonido desactivado", Toast.LENGTH_SHORT).show()
+        if (soundOn) playTone(ToneGenerator.TONE_DTMF_C)
+    }
+
     // =================================================================
     //  Temas, colores y animaciones
     // =================================================================
 
+    private fun setTheme(toDark: Boolean, animate: Boolean) {
+        dark = toDark
+        applyTheme(animate)
+    }
+
+    private fun setAccent(a: Accent, animate: Boolean) {
+        accent = a
+        applyTheme(animate)
+    }
+
+    /** Aplica la combinación actual de color + modo claro/oscuro sin tocar la expresión. */
+    private fun applyTheme(animate: Boolean) {
+        val from = cur
+        val to = Palette.get(accent, dark)
+        updateSystemBars()
+        themeAnim?.cancel()
+        if (animate && animationsEnabled()) {
+            val anim = ValueAnimator.ofFloat(0f, 1f)
+            anim.duration = 350
+            anim.addUpdateListener { applyPalette(Palette.lerp(from, to, it.animatedFraction)) }
+            themeAnim = anim
+            anim.start()
+        } else {
+            applyPalette(to)
+        }
+    }
+
+    private class Choice(val label: String, val dot: Int?, val selected: Boolean, val action: () -> Unit)
+
+    /** Menú de tres puntos: sonido, modo claro/oscuro, colores e historial. */
+    private fun showMainMenu(anchor: View) {
+        showChoices(anchor, listOf(
+            Choice(if (soundOn) "Sonido: activado" else "Sonido: desactivado", null, soundOn) {
+                toggleSound()
+            },
+            Choice("Modo oscuro", null, dark) {
+                playTone(ToneGenerator.TONE_DTMF_C)
+                setTheme(!dark, true)
+                savePrefs()
+            },
+            Choice("Cambiar colores  ▸", null, false) { showColorPopup(anchor) }
+        ), true)
+    }
+
+    private fun showColorPopup(anchor: View) {
+        showChoices(anchor, listOf(
+            Choice("Azul", col("#2E7BFF"), accent == Accent.BLUE) {
+                setAccent(Accent.BLUE, true)
+                savePrefs()
+            },
+            Choice("Rosa fucsia", col("#FF2E93"), accent == Accent.PINK) {
+                setAccent(Accent.PINK, true)
+                savePrefs()
+            },
+            Choice("Verde", col("#14C46B"), accent == Accent.GREEN) {
+                setAccent(Accent.GREEN, true)
+                savePrefs()
+            }
+        ), true)
+    }
+
+    /** Menú desplegable propio, con los colores del tema actual. */
+    private fun showChoices(anchor: View, choices: List<Choice>, alignEnd: Boolean = false) {
+        val p = cur
+        val ctx = this@MainActivity
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            minimumWidth = dp(220)
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dpF(16)
+                setColor(p.card)
+                setStroke(dp(1), ColorUtils.setAlphaComponent(p.stroke, 200))
+            }
+        }
+        val popup = PopupWindow(
+            box, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true
+        )
+        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        popup.elevation = dpF(10)
+        for (c in choices) {
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(12), 0, dp(12), 0)
+                isClickable = true
+                contentDescription = c.label
+                background = GradientDrawable().apply {
+                    cornerRadius = dpF(12)
+                    setColor(if (c.selected) p.hdrBg else Color.TRANSPARENT)
+                }
+            }
+            val dotColor = c.dot
+            if (dotColor != null) {
+                row.addView(TextView(ctx).apply {
+                    text = "●"
+                    textSize = 20f
+                    setTextColor(dotColor)
+                    setPadding(0, 0, dp(10), 0)
+                })
+            }
+            row.addView(
+                TextView(ctx).apply {
+                    text = c.label
+                    textSize = 16f
+                    setTextColor(p.text)
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            if (c.selected) {
+                row.addView(TextView(ctx).apply {
+                    text = "✓"
+                    textSize = 18f
+                    setTextColor(p.stroke)
+                    setPadding(dp(10), 0, 0, 0)
+                })
+            }
+            row.setOnClickListener {
+                popup.dismiss()
+                c.action()
+            }
+            box.addView(
+                row,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            )
+        }
+        if (alignEnd) {
+            popup.showAsDropDown(anchor, 0, dp(4), Gravity.END)
+        } else {
+            popup.showAsDropDown(anchor, 0, dp(4))
+        }
+    }
+
     private fun updateSystemBars() {
         val ctl = WindowCompat.getInsetsController(window, root)
-        ctl.isAppearanceLightStatusBars = true
-        ctl.isAppearanceLightNavigationBars = true
+        ctl.isAppearanceLightStatusBars = !dark
+        ctl.isAppearanceLightNavigationBars = !dark
     }
 
     private fun applyPalette(p: Palette) {
