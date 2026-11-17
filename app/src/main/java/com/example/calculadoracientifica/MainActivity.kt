@@ -1,5 +1,7 @@
 package com.example.calculadoracientifica
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.SharedPreferences
@@ -27,17 +29,24 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.widget.AbsListView
+import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import org.json.JSONArray
+import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.MathContext
 import kotlin.math.abs
@@ -275,6 +284,18 @@ object ExpressionEvaluator {
 //  ACTIVIDAD PRINCIPAL
 // =====================================================================
 
+private data class HistoryItem(val expr: String, val result: String)
+
+private class HistoryHolder(
+    val row: LinearLayout,
+    val bg: GradientDrawable,
+    val expr: TextView,
+    val res: TextView,
+    val del: TextView
+) {
+    var pos = 0
+}
+
 private fun col(s: String): Int = Color.parseColor(s)
 
 class MainActivity : AppCompatActivity() {
@@ -373,11 +394,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etExpression: EditText
     private lateinit var btnAngle: Button
     private lateinit var btnMenu: Button
+    private lateinit var rowSci: View
+    private lateinit var historyPanel: View
+    private lateinit var tvHistoryTitle: TextView
+    private lateinit var tvHistoryHint: TextView
+    private lateinit var tvHistoryEmpty: TextView
+    private lateinit var lvHistory: ListView
 
     // ---- Drawables ----
     private val blob1Bg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
     private val blob2Bg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
     private val cardBg = GradientDrawable()
+    private val panelBg = GradientDrawable()
     private val cursorDrawable = GradientDrawable()
     private val titleBg = GradientDrawable()
 
@@ -385,14 +413,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private var cur: Palette = Palette.PINK_LIGHT
     private var accent = Accent.PINK
+    private var scientific = true
     private var dark = false
     private var deg = true
     private var soundOn = true
     private var justEvaluated = false
     private var lastResult: String? = null
     private var resultState = 0 // 0 = vista previa, 1 = final, 2 = error
+    private var historyOpen = false
+    private val history = ArrayList<HistoryItem>()
     private val keys = ArrayList<Key>()
     private var themeAnim: ValueAnimator? = null
+    private lateinit var historyAdapter: HistoryAdapter
+    private lateinit var backCallback: OnBackPressedCallback
 
     // ---- Sonido y sensores ----
     private var tone: ToneGenerator? = null
@@ -424,6 +457,10 @@ class MainActivity : AppCompatActivity() {
         private const val K_DEG = "deg"
         private const val K_SOUND = "sound"
         private const val K_ACCENT = "accent"
+        private const val K_SCI = "scientific"
+        private const val K_EXPR = "expr"
+        private const val K_HISTORY = "history"
+        private const val MAX_HISTORY = 200
         private const val MAX_LENGTH = 300
     }
 
@@ -446,10 +483,13 @@ class MainActivity : AppCompatActivity() {
         dark = prefs.getBoolean(K_DARK, systemDark)
         deg = prefs.getBoolean(K_DEG, true)
         soundOn = prefs.getBoolean(K_SOUND, true)
+        scientific = prefs.getBoolean(K_SCI, true)
         accent = Accent.values().getOrElse(prefs.getInt(K_ACCENT, Accent.PINK.ordinal)) { Accent.PINK }
+        loadHistory()
 
         setupDrawables()
         setupKeys()
+        setupHistoryUi()
 
         try {
             tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
@@ -470,8 +510,12 @@ class MainActivity : AppCompatActivity() {
         cur = Palette.get(accent, dark)
         applyPalette(cur)
         updateSystemBars()
-        refreshAngleUi()
+        refreshModeUi()
+        adaptForOrientation()
 
+        val saved = prefs.getString(K_EXPR, "") ?: ""
+        etExpression.setText(saved)
+        etExpression.setSelection(saved.length)
         etExpression.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -489,6 +533,13 @@ class MainActivity : AppCompatActivity() {
             WindowInsetsCompat.CONSUMED
         }
         ViewCompat.requestApplyInsets(root)
+
+        backCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                closeHistory()
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, backCallback)
     }
 
     override fun onResume() {
@@ -521,7 +572,9 @@ class MainActivity : AppCompatActivity() {
             .putBoolean(K_DARK, dark)
             .putBoolean(K_DEG, deg)
             .putBoolean(K_SOUND, soundOn)
+            .putBoolean(K_SCI, scientific)
             .putInt(K_ACCENT, accent.ordinal)
+            .putString(K_EXPR, etExpression.text.toString())
             .apply()
     }
 
@@ -540,6 +593,12 @@ class MainActivity : AppCompatActivity() {
         etExpression = findViewById(R.id.etExpression)
         btnAngle = findViewById(R.id.btnAngle)
         btnMenu = findViewById(R.id.btnMenu)
+        rowSci = findViewById(R.id.rowSci)
+        historyPanel = findViewById(R.id.historyPanel)
+        tvHistoryTitle = findViewById(R.id.tvHistoryTitle)
+        tvHistoryHint = findViewById(R.id.tvHistoryHint)
+        tvHistoryEmpty = findViewById(R.id.tvHistoryEmpty)
+        lvHistory = findViewById(R.id.lvHistory)
     }
 
     private fun setupDrawables() {
@@ -549,6 +608,8 @@ class MainActivity : AppCompatActivity() {
         displayCard.background = cardBg
         titleBg.cornerRadius = dpF(14)
         tvTitle.background = titleBg
+        panelBg.cornerRadius = dpF(24)
+        historyPanel.background = panelBg
         if (Build.VERSION.SDK_INT >= 29) {
             cursorDrawable.setSize(dp(2), -1)
             etExpression.textCursorDrawable = cursorDrawable
@@ -587,11 +648,32 @@ class MainActivity : AppCompatActivity() {
             clearAll()
             true
         }
-        key(R.id.btnEquals, Kind.EQ, ToneGenerator.TONE_PROP_PROMPT) { calculate() }
+        key(R.id.btnEquals, Kind.EQ, ToneGenerator.TONE_PROP_PROMPT) { calculate(true) }
 
         // Encabezado
         key(R.id.btnAngle, Kind.HDR, ToneGenerator.TONE_DTMF_C) { toggleAngle() }
         key(R.id.btnMenu, Kind.HDR, ToneGenerator.TONE_DTMF_C) { showMainMenu(btnMenu) }
+        tvTitle.setOnClickListener {
+            playTone(ToneGenerator.TONE_DTMF_C)
+            showModePopup(tvTitle)
+        }
+    }
+
+    private fun setupHistoryUi() {
+        historyAdapter = HistoryAdapter()
+        lvHistory.adapter = historyAdapter
+        lvHistory.setOnItemClickListener { _, _, position, _ ->
+            if (position in history.indices) {
+                val e = history[position].expr
+                justEvaluated = false
+                etExpression.setText(e)
+                etExpression.setSelection(e.length)
+                closeHistory()
+            }
+        }
+        key(R.id.btnClearHistory, Kind.HDR, -1) { confirmClearHistory() }
+        key(R.id.btnCloseHistory, Kind.HDR, -1) { closeHistory() }
+        updateHistoryEmpty()
     }
 
     // =================================================================
@@ -837,7 +919,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun calculate() {
+    private fun calculate(addToHistory: Boolean) {
         val s = etExpression.text.toString().trim()
         if (s.isEmpty()) return
         try {
@@ -846,6 +928,7 @@ class MainActivity : AppCompatActivity() {
             justEvaluated = true
             showResult(r, 1)
             animateResult()
+            if (addToHistory && !numberOnly.matches(s)) addHistory(s, r)
         } catch (e: CalcException) {
             lastResult = null
             justEvaluated = false
@@ -881,13 +964,13 @@ class MainActivity : AppCompatActivity() {
     private fun toggleAngle() {
         deg = !deg
         refreshAngleUi()
-        if (justEvaluated) calculate() else updatePreview()
+        if (justEvaluated) calculate(false) else updatePreview()
         savePrefs()
     }
 
     private fun refreshAngleUi() {
         btnAngle.text = if (deg) "DEG" else "RAD"
-        tvAngle.text = if (deg) "DEG · GRADOS" else "RAD · RADIANES"
+        tvAngle.text = if (!scientific) "MODO BÁSICO" else if (deg) "DEG · GRADOS" else "RAD · RADIANES"
         btnAngle.contentDescription =
             if (deg) "Modo grados activo. Pulsa para usar radianes" else "Modo radianes activo. Pulsa para usar grados"
     }
@@ -897,6 +980,163 @@ class MainActivity : AppCompatActivity() {
         savePrefs()
         Toast.makeText(this, if (soundOn) "Sonido activado" else "Sonido desactivado", Toast.LENGTH_SHORT).show()
         if (soundOn) playTone(ToneGenerator.TONE_DTMF_C)
+    }
+
+    // =================================================================
+    //  Historial
+    // =================================================================
+
+    private fun addHistory(expr: String, result: String) {
+        val first = history.firstOrNull()
+        if (first != null && first.expr == expr && first.result == result) return
+        history.add(0, HistoryItem(expr, result))
+        while (history.size > MAX_HISTORY) history.removeAt(history.lastIndex)
+        saveHistory()
+        historyAdapter.notifyDataSetChanged()
+        updateHistoryEmpty()
+    }
+
+    private fun loadHistory() {
+        history.clear()
+        try {
+            val arr = JSONArray(prefs.getString(K_HISTORY, "[]") ?: "[]")
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                history.add(HistoryItem(o.getString("e"), o.getString("r")))
+            }
+        } catch (e: Exception) {
+            history.clear()
+        }
+    }
+
+    private fun saveHistory() {
+        val arr = JSONArray()
+        for (h in history) {
+            arr.put(JSONObject().put("e", h.expr).put("r", h.result))
+        }
+        prefs.edit().putString(K_HISTORY, arr.toString()).apply()
+    }
+
+    private fun deleteHistoryAt(pos: Int) {
+        if (pos !in history.indices) return
+        history.removeAt(pos)
+        saveHistory()
+        historyAdapter.notifyDataSetChanged()
+        updateHistoryEmpty()
+    }
+
+    private fun confirmClearHistory() {
+        if (history.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle("Borrar historial")
+            .setMessage("¿Eliminar todas las operaciones guardadas?")
+            .setPositiveButton("Borrar") { _, _ ->
+                history.clear()
+                saveHistory()
+                historyAdapter.notifyDataSetChanged()
+                updateHistoryEmpty()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun updateHistoryEmpty() {
+        tvHistoryEmpty.visibility = if (history.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun openHistory() {
+        if (historyOpen) return
+        historyOpen = true
+        backCallback.isEnabled = true
+        historyAdapter.notifyDataSetChanged()
+        updateHistoryEmpty()
+        historyPanel.visibility = View.VISIBLE
+        if (animationsEnabled()) {
+            historyPanel.alpha = 0f
+            historyPanel.translationY = dpF(80)
+            historyPanel.animate().alpha(1f).translationY(0f).setDuration(260)
+                .setInterpolator(DecelerateInterpolator()).start()
+        } else {
+            historyPanel.alpha = 1f
+            historyPanel.translationY = 0f
+        }
+    }
+
+    private fun closeHistory() {
+        if (!historyOpen) return
+        historyOpen = false
+        backCallback.isEnabled = false
+        if (animationsEnabled()) {
+            historyPanel.animate().alpha(0f).translationY(dpF(80)).setDuration(200)
+                .withEndAction { if (!historyOpen) historyPanel.visibility = View.GONE }
+                .start()
+        } else {
+            historyPanel.visibility = View.GONE
+        }
+    }
+
+    private inner class HistoryAdapter : BaseAdapter() {
+        override fun getCount() = history.size
+        override fun getItem(position: Int): Any = history[position]
+        override fun getItemId(position: Int) = position.toLong()
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val holder: HistoryHolder
+            if (convertView == null) {
+                holder = buildHolder()
+                holder.row.tag = holder
+            } else {
+                holder = convertView.tag as HistoryHolder
+            }
+            val item = history[position]
+            holder.pos = position
+            holder.expr.text = item.expr
+            holder.res.text = "= ${item.result}"
+            holder.bg.setColor(cur.item)
+            holder.bg.setStroke(dp(1), ColorUtils.setAlphaComponent(cur.stroke, 90))
+            holder.expr.setTextColor(cur.textSec)
+            holder.res.setTextColor(cur.text)
+            holder.del.setTextColor(cur.clrText)
+            return holder.row
+        }
+
+        private fun buildHolder(): HistoryHolder {
+            val row = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(10), dp(6), dp(10))
+                layoutParams = AbsListView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+            val bg = GradientDrawable().apply { cornerRadius = dpF(16) }
+            row.background = bg
+
+            val colLayout = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            val expr = TextView(this@MainActivity).apply { textSize = 14f }
+            val res = TextView(this@MainActivity).apply {
+                textSize = 20f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+            colLayout.addView(expr)
+            colLayout.addView(res)
+            row.addView(colLayout, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+            val del = TextView(this@MainActivity).apply {
+                text = "✕"
+                textSize = 18f
+                gravity = Gravity.CENTER
+                isClickable = true
+                contentDescription = "Borrar esta operación"
+            }
+            row.addView(del, LinearLayout.LayoutParams(dp(44), dp(44)))
+
+            val holder = HistoryHolder(row, bg, expr, res, del)
+            del.setOnClickListener { deleteHistoryAt(holder.pos) }
+            return holder
+        }
     }
 
     // =================================================================
@@ -923,11 +1163,33 @@ class MainActivity : AppCompatActivity() {
             val anim = ValueAnimator.ofFloat(0f, 1f)
             anim.duration = 350
             anim.addUpdateListener { applyPalette(Palette.lerp(from, to, it.animatedFraction)) }
+            anim.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    historyAdapter.notifyDataSetChanged()
+                }
+            })
             themeAnim = anim
             anim.start()
         } else {
             applyPalette(to)
+            historyAdapter.notifyDataSetChanged()
         }
+    }
+
+    private fun setMode(sci: Boolean) {
+        scientific = sci
+        refreshModeUi()
+        savePrefs()
+    }
+
+    private fun refreshModeUi() {
+        tvTitle.text = if (scientific) "CALCULADORA CIENTÍFICA  ▾" else "CALCULADORA BÁSICA  ▾"
+        tvTitle.contentDescription =
+            if (scientific) "Calculadora científica. Pulsa para cambiar de tipo" else "Calculadora básica. Pulsa para cambiar de tipo"
+        val vis = if (scientific) View.VISIBLE else View.GONE
+        rowSci.visibility = vis
+        btnAngle.visibility = vis
+        refreshAngleUi()
     }
 
     private class Choice(val label: String, val dot: Int?, val selected: Boolean, val action: () -> Unit)
@@ -943,8 +1205,16 @@ class MainActivity : AppCompatActivity() {
                 setTheme(!dark, true)
                 savePrefs()
             },
-            Choice("Cambiar colores  ▸", null, false) { showColorPopup(anchor) }
+            Choice("Cambiar colores  ▸", null, false) { showColorPopup(anchor) },
+            Choice("Historial", null, false) { openHistory() }
         ), true)
+    }
+
+    private fun showModePopup(anchor: View) {
+        showChoices(anchor, listOf(
+            Choice("Calculadora científica", null, scientific) { setMode(true) },
+            Choice("Calculadora básica", null, !scientific) { setMode(false) }
+        ))
     }
 
     private fun showColorPopup(anchor: View) {
@@ -1052,6 +1322,8 @@ class MainActivity : AppCompatActivity() {
 
         cardBg.setColor(p.card)
         cardBg.setStroke(dp(2), p.stroke)
+        panelBg.setColor(p.panel)
+        panelBg.setStroke(dp(2), ColorUtils.setAlphaComponent(p.stroke, 200))
         cursorDrawable.setColor(p.stroke)
 
         tvTitle.setTextColor(p.text)
@@ -1063,7 +1335,24 @@ class MainActivity : AppCompatActivity() {
         etExpression.setHintTextColor(p.textSec)
         tvResult.setTextColor(resultColor())
 
+        tvHistoryTitle.setTextColor(p.text)
+        tvHistoryHint.setTextColor(p.textSec)
+        tvHistoryEmpty.setTextColor(p.textSec)
+
         for (k in keys) k.refresh(p)
+    }
+
+    private fun adaptForOrientation() {
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            val m = dp(2)
+            for (k in keys) {
+                if (k.kind == Kind.HDR) continue
+                k.view.textSize = 16f
+                (k.view.layoutParams as? LinearLayout.LayoutParams)?.setMargins(m, m, m, m)
+                k.view.requestLayout()
+            }
+            etExpression.textSize = 22f
+        }
     }
 
     private fun animationsEnabled(): Boolean = try {
